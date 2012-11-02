@@ -19,6 +19,7 @@ module EdgeJS {
         getNodes(): Node[];
         getEdges(n: Node);
         getOpposite(node: Node, edge: Edge): Node;
+        getNodeById(id: string): Node;
 
         addNode(node: Node): void;
         addEdge(edge: Edge): void;
@@ -76,10 +77,17 @@ module EdgeJS {
             edges = this.edgeByNode[edge.getTarget()] || (this.edgeByNode[edge.getTarget()] = new Edge[]);
             edges.push(edge);
         }
+
+        public getNodeById(id: string): Node {
+            return this.nodesById[id];
+        }
     }
 
     export class MeasureResults {
         private results = {};
+        public avgDist: number;
+        public diameter: number;
+        public radius: number;
 
         add(node: Node, result: MeasureResult): void {
             this.results[node.getId()] = result;
@@ -118,6 +126,9 @@ module EdgeJS {
 
     export class Measure {
         private N: number;
+        private betweenness: number[];
+        private eccentricity: number[];
+        private closeness: number[];
 
         private diameter: number;
         private radius: number;
@@ -128,26 +139,21 @@ module EdgeJS {
         private isNormalized: bool;
 
         private zeroArrayOf(n: number): number[] {
-            return (function () {
-                var a = [];
-                var i;
-                for (i = 0; i < n; i++) {
-                    a[i] = 0;
-                }
-                console.log("new array", a);
-                return a;
-            })();
+            var a = new number[];
+            var i;
+            for (i = 0; i < n; i++) {
+                a[i] = 0;
+            }
+
+            return a;
         };
 
         public execute(hgraph: Graph, results: MeasureResults) {
             this.N = hgraph.getNodeCount();
 
-
-            var betweenness: number[] = this.zeroArrayOf(this.N);
-            var eccentricity: number[] = this.zeroArrayOf(this.N);
-            var closeness: number[] = this.zeroArrayOf(this.N);
-
-            //console.log("bet1", betweenness, this);
+            this.betweenness = this.zeroArrayOf(this.N);
+            this.eccentricity = this.zeroArrayOf(this.N);
+            this.closeness = this.zeroArrayOf(this.N);
             this.diameter = 0;
             this.avgDist = 0;
             this.shortestPaths = 0;
@@ -157,7 +163,7 @@ module EdgeJS {
 
             var it: number;
             var s: Node;
-            
+
             var allNodes: Node[] = hgraph.getNodes();
             for (it = 0; it < allNodes.length; it++) {
                 s = allNodes[it];
@@ -189,7 +195,7 @@ module EdgeJS {
                 var Q = new Node[];
                 Q.push(s);
                 while (Q.length > 0) {
-                    var v: Node = Q.pop();
+                    var v: Node = Q.shift();
 
                     ns.push(v);
                     var v_index: number = indicies[v.getId()];
@@ -212,23 +218,22 @@ module EdgeJS {
                         }
                     }
                 }
-                //console.log(s.getId(), P);
                 var reachableCount: number = 0;
                 var i: any;
                 for (i = 0; i < this.N; i++) {
                     if (d[i] > 0) {
                         this.avgDist += d[i];
-                        eccentricity[s_index] = Math.max(eccentricity[s_index], d[i]);
-                        closeness[s_index] += d[i];
+                        this.eccentricity[s_index] = Math.max(this.eccentricity[s_index], d[i]);
+                        this.closeness[s_index] += d[i];
                         this.diameter = Math.max(this.diameter, d[i]);
                         reachableCount++;
                     }
                 }
 
-                this.radius = Math.min(eccentricity[s_index], this.radius);
+                this.radius = Math.min(this.eccentricity[s_index], this.radius);
 
                 if (reachableCount != 0) {
-                    closeness[s_index] /= reachableCount;
+                    this.closeness[s_index] /= reachableCount;
                 }
 
                 this.shortestPaths += reachableCount;
@@ -244,20 +249,20 @@ module EdgeJS {
                         delta[u_index] += (theta[u_index] / theta[w_index]) * (1 + delta[w_index]);
                     }
                     if (w != s) {
-                        //console.log("update bet", "s:" + s.getId(), "w:" + w.getId(), this.betweenness[w_index], delta[w_index]);
-                        betweenness[w_index] += delta[w_index];
-                        //console.log("after update bet", "s:" + s.getId(), "w:" + w.getId(), betweenness[w_index]);
+                        this.betweenness[w_index] += delta[w_index];
                     }
                 }
                 count++;
-                
-                //console.log("bet", betweenness);
+
                 // We can check here if the calc was canceled and stop it.
             }
-            //console.log("bet", betweenness);
 
             //mN * (mN - 1.0f);
             this.avgDist /= this.shortestPaths;
+
+            results.avgDist = this.avgDist;
+            results.diameter = this.diameter;
+            results.radius = this.radius;
 
             for (it = 0; it < allNodes.length; it++) {
                 s = allNodes[it];
@@ -265,16 +270,71 @@ module EdgeJS {
 
                 // We can add here check if the graph is directed or undirected.
                 // Currently we only support undirected graph.
-                betweenness[s_index] /= 2;
+                this.betweenness[s_index] /= 2;
                 if (this.isNormalized) {
-                    closeness[s_index] = (closeness[s_index] == 0) ? 0 : 1.0 / closeness[s_index];
-                    betweenness[s_index] /= this.isDirected ? (this.N - 1) * (this.N - 2) : (this.N - 1) * (this.N - 2) / 2;
+                    this.closeness[s_index] = (this.closeness[s_index] == 0) ? 0 : 1.0 / this.closeness[s_index];
+                    this.betweenness[s_index] /= this.isDirected ? (this.N - 1) * (this.N - 2) : (this.N - 1) * (this.N - 2) / 2;
                 }
                 results.add(s, new MeasureResult(
-                    eccentricity[s_index],
-                    closeness[s_index],
-                    betweenness[s_index]));
+                    this.eccentricity[s_index],
+                    this.closeness[s_index],
+                    this.betweenness[s_index]));
             }
+        }
+
+        public static minPathTo(hgraph: Graph, rootId: string): any {
+            var n = hgraph.getNodeCount();
+            var allNodes: Node[] = hgraph.getNodes();
+            var s: Node;
+            var indicies = {};
+            var d = new number[];
+
+            var it: number;
+            var index: number = 0;
+            for (it = 0; it < allNodes.length; it++) {
+                s = allNodes[it];
+                indicies[s.getId()] = index;
+                d[index] = -1;
+                index++;
+            }
+
+            s = hgraph.getNodeById(rootId);
+            var s_index: number = indicies[s.getId()];
+            d[s_index] = 0;
+
+            var Q = new Node[];
+            Q.push(s);
+            var dist: number = 0;
+
+            while (Q.length > 0) {
+                var v: Node = Q.shift();
+                var v_index: number = indicies[v.getId()];
+                var nodeEdges: Edge[] = hgraph.getEdges(v);
+
+                var edge: Edge;
+                var edgeIt: number;
+                
+                for (edgeIt = 0; edgeIt < nodeEdges.length; edgeIt++) {
+                    edge = nodeEdges[edgeIt];
+                    var reachable: Node = hgraph.getOpposite(v, edge);
+                    var r_index: number = indicies[reachable.getId()];
+                    if (d[r_index] < 0) {
+                        Q.push(reachable);
+                        d[r_index] = d[v_index] + 1;
+                    }
+                }
+            }
+
+            // All measure is done
+
+            var results = {};
+            for (it = 0; it < allNodes.length; it++) {
+                s = allNodes[it];
+                s_index = indicies[s.getId()];
+                results[s.getId()] = d[s_index];
+            }
+
+            return results;
         }
     }
 

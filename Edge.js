@@ -69,6 +69,9 @@ var EdgeJS;
             edges = this.edgeByNode[edge.getTarget()] || (this.edgeByNode[edge.getTarget()] = new Array());
             edges.push(edge);
         };
+        SimpleGraph.prototype.getNodeById = function (id) {
+            return this.nodesById[id];
+        };
         return SimpleGraph;
     })();
     EdgeJS.SimpleGraph = SimpleGraph;    
@@ -112,21 +115,18 @@ var EdgeJS;
     var Measure = (function () {
         function Measure() { }
         Measure.prototype.zeroArrayOf = function (n) {
-            return (function () {
-                var a = [];
-                var i;
-                for(i = 0; i < n; i++) {
-                    a[i] = 0;
-                }
-                console.log("new array", a);
-                return a;
-            })();
+            var a = new Array();
+            var i;
+            for(i = 0; i < n; i++) {
+                a[i] = 0;
+            }
+            return a;
         };
         Measure.prototype.execute = function (hgraph, results) {
             this.N = hgraph.getNodeCount();
-            var betweenness = this.zeroArrayOf(this.N);
-            var eccentricity = this.zeroArrayOf(this.N);
-            var closeness = this.zeroArrayOf(this.N);
+            this.betweenness = this.zeroArrayOf(this.N);
+            this.eccentricity = this.zeroArrayOf(this.N);
+            this.closeness = this.zeroArrayOf(this.N);
             this.diameter = 0;
             this.avgDist = 0;
             this.shortestPaths = 0;
@@ -161,7 +161,7 @@ var EdgeJS;
                 var Q = new Array();
                 Q.push(s);
                 while(Q.length > 0) {
-                    var v = Q.pop();
+                    var v = Q.shift();
                     ns.push(v);
                     var v_index = indicies[v.getId()];
                     var nodeEdges = hgraph.getEdges(v);
@@ -186,15 +186,15 @@ var EdgeJS;
                 for(i = 0; i < this.N; i++) {
                     if(d[i] > 0) {
                         this.avgDist += d[i];
-                        eccentricity[s_index] = Math.max(eccentricity[s_index], d[i]);
-                        closeness[s_index] += d[i];
+                        this.eccentricity[s_index] = Math.max(this.eccentricity[s_index], d[i]);
+                        this.closeness[s_index] += d[i];
                         this.diameter = Math.max(this.diameter, d[i]);
                         reachableCount++;
                     }
                 }
-                this.radius = Math.min(eccentricity[s_index], this.radius);
+                this.radius = Math.min(this.eccentricity[s_index], this.radius);
                 if(reachableCount != 0) {
-                    closeness[s_index] /= reachableCount;
+                    this.closeness[s_index] /= reachableCount;
                 }
                 this.shortestPaths += reachableCount;
                 var delta = this.zeroArrayOf(this.N);
@@ -208,23 +208,72 @@ var EdgeJS;
                         delta[u_index] += (theta[u_index] / theta[w_index]) * (1 + delta[w_index]);
                     }
                     if(w != s) {
-                        betweenness[w_index] += delta[w_index];
+                        this.betweenness[w_index] += delta[w_index];
                     }
                 }
                 count++;
             }
             this.avgDist /= this.shortestPaths;
+            results.avgDist = this.avgDist;
+            results.diameter = this.diameter;
+            results.radius = this.radius;
             for(it = 0; it < allNodes.length; it++) {
                 s = allNodes[it];
                 s_index = indicies[s.getId()];
-                betweenness[s_index] /= 2;
+                this.betweenness[s_index] /= 2;
                 if(this.isNormalized) {
-                    closeness[s_index] = (closeness[s_index] == 0) ? 0 : 1 / closeness[s_index];
-                    betweenness[s_index] /= this.isDirected ? (this.N - 1) * (this.N - 2) : (this.N - 1) * (this.N - 2) / 2;
+                    this.closeness[s_index] = (this.closeness[s_index] == 0) ? 0 : 1 / this.closeness[s_index];
+                    this.betweenness[s_index] /= this.isDirected ? (this.N - 1) * (this.N - 2) : (this.N - 1) * (this.N - 2) / 2;
                 }
-                results.add(s, new MeasureResult(eccentricity[s_index], closeness[s_index], betweenness[s_index]));
+                results.add(s, new MeasureResult(this.eccentricity[s_index], this.closeness[s_index], this.betweenness[s_index]));
             }
         };
+        Measure.minPathTo = function minPathTo(hgraph, rootId) {
+            var n = hgraph.getNodeCount();
+            var allNodes = hgraph.getNodes();
+            var s;
+            var indicies = {
+            };
+            var d = new Array();
+            var it;
+            var index = 0;
+            for(it = 0; it < allNodes.length; it++) {
+                s = allNodes[it];
+                indicies[s.getId()] = index;
+                d[index] = -1;
+                index++;
+            }
+            s = hgraph.getNodeById(rootId);
+            var s_index = indicies[s.getId()];
+            d[s_index] = 0;
+            var Q = new Array();
+            Q.push(s);
+            var dist = 0;
+            while(Q.length > 0) {
+                var v = Q.shift();
+                var v_index = indicies[v.getId()];
+                var nodeEdges = hgraph.getEdges(v);
+                var edge;
+                var edgeIt;
+                for(edgeIt = 0; edgeIt < nodeEdges.length; edgeIt++) {
+                    edge = nodeEdges[edgeIt];
+                    var reachable = hgraph.getOpposite(v, edge);
+                    var r_index = indicies[reachable.getId()];
+                    if(d[r_index] < 0) {
+                        Q.push(reachable);
+                        d[r_index] = d[v_index] + 1;
+                    }
+                }
+            }
+            var results = {
+            };
+            for(it = 0; it < allNodes.length; it++) {
+                s = allNodes[it];
+                s_index = indicies[s.getId()];
+                results[s.getId()] = d[s_index];
+            }
+            return results;
+        }
         return Measure;
     })();
     EdgeJS.Measure = Measure;    
